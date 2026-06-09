@@ -101,6 +101,37 @@ h2 {
   background: #f5c451;
 }
 
+.save-status.error span {
+  background: #ef7777;
+}
+
+.account-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.account-btn {
+  border: 1px solid #303540;
+  border-radius: 10px;
+  color: #d9dce2;
+  background: #1b1f25;
+  padding: 9px 12px;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.account-btn.primary {
+  border-color: #5d6bf2;
+  color: #fff;
+  background: #5d6bf2;
+}
+
+.account-btn:hover {
+  filter: brightness(1.1);
+}
+
 .panel {
   border: 1px solid #292d35;
   border-radius: 18px;
@@ -452,7 +483,14 @@ h2 {
   }
 
   .app-header {
+    align-items: flex-start;
+    flex-direction: column;
     padding: 6px 4px;
+  }
+
+  .account-controls {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .entry-panel,

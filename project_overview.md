@@ -12,8 +12,9 @@ TypeScript, and Vite. It lets a user:
 - Compare the current seven-day weight average with the previous seven days.
 - See calendar entries color-coded as cutting, maintenance, or bulking zones.
 
-The app is entirely client-side. It has no backend, user accounts, or external
-database. Journal entries are stored in the browser's `localStorage`.
+The app uses Firebase Authentication and Cloud Firestore to sync journal
+entries between devices. A per-account `localStorage` cache keeps startup fast
+and preserves data while the app is temporarily offline.
 
 ## Folder Structure
 
@@ -30,6 +31,7 @@ macro-journal/
 |   |   `-- vite.svg
 |   |-- App.css
 |   |-- App.tsx
+|   |-- firebase.ts
 |   |-- index.css
 |   `-- main.tsx
 |-- dist/
@@ -56,6 +58,7 @@ Contains the application source code.
   `index.html` and renders the `App` component inside React `StrictMode`.
 - `App.tsx` contains the journal's data types, state, calculation helpers,
   event handlers, and all UI components.
+- `firebase.ts` initializes Firebase Authentication and Cloud Firestore.
 - `App.css` contains the journal-specific layout and component styles.
 - `index.css` contains global styles, root sizing, typography, color variables,
   and some starter theme styles.
@@ -135,17 +138,27 @@ The `App` component manages these main pieces of state:
 - `selectedDay`: the date currently being edited.
 - `viewMonth`: the month currently shown in the calendar.
 - `saveStatus`: shows whether the latest local changes have been saved.
+- `user` and `authReady`: track Google sign-in state.
 
-When the app starts, `entries` is loaded from this browser storage key:
+Before sign-in, legacy entries are loaded from this browser storage key:
 
 ```text
 macro-journal-v2-entries
 ```
 
-A React effect saves the full entries object back to `localStorage` whenever an
-entry changes. This means data remains available after refreshing the page, but
-it is specific to the current browser and device. Clearing browser storage will
-remove the journal data.
+After Google sign-in, entries are stored in Firestore at:
+
+```text
+users/{firebaseUserId}/entries/{YYYY-MM-DD}
+```
+
+Existing local entries are uploaded when a user first signs in. If both local
+and cloud data exist for the same date, the cloud entry wins. After migration,
+the browser cache is separated by Firebase user ID and Firestore changes are
+received in real time.
+
+Firestore access is protected by the security rules in `rules.txt`, which allow
+signed-in users to read and write only their own dated entries.
 
 ## Main Interface Sections
 
@@ -155,9 +168,10 @@ The first panel is a complete entry form for the selected date. It defaults to
 today and lets the user enter calories, protein, and weight together. Notes are
 available in a collapsible section to keep everyday logging compact.
 
-Changes save immediately, and the header shows a short local save status. When
-a historical date is selected from the calendar, the same card edits that date
-and displays a **Back to today** action.
+Changes save immediately, and the header shows whether data is saved locally,
+syncing, synced, or experiencing a sync issue. When a historical date is
+selected from the calendar, the same card edits that date and displays a
+**Back to today** action.
 
 ### Weekly Stats
 
@@ -236,8 +250,8 @@ npm run preview   Preview the production build locally
 npm run deploy    Build and publish dist/ to GitHub Pages
 ```
 
-The main runtime dependencies are React and React DOM. Vite, TypeScript, ESLint,
-and `gh-pages` are development dependencies.
+The main runtime dependencies are React, React DOM, and Firebase. Vite,
+TypeScript, ESLint, and `gh-pages` are development dependencies.
 
 ### `vite.config.ts`
 

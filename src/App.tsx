@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import "./App.css";
+import { auth, db, googleProvider } from "./firebase";
 
 type DayEntry = {
   calories?: number;
@@ -14,6 +25,32 @@ type CalendarMode = "calories" | "protein" | "weight";
 const DEFAULT_CALORIE_TARGET = 2100;
 const DEFAULT_PROTEIN_TARGET = 160;
 const STORAGE_KEY = "macro-journal-v2-entries";
+
+function getUserStorageKey(userId: string) {
+  return `${STORAGE_KEY}-${userId}`;
+}
+
+function loadLocalEntries(storageKey = STORAGE_KEY): EntriesMap {
+  try {
+    const saved = localStorage.getItem(storageKey);
+    return saved ? JSON.parse(saved) : {};
+  } catch {
+    return {};
+  }
+}
+
+function cleanEntry(entry: DayEntry): DayEntry {
+  return Object.fromEntries(
+    Object.entries(entry).filter(([, value]) => value !== undefined),
+  ) as DayEntry;
+}
+
+function getSaveStatusLabel(status: "local" | "saving" | "synced" | "error") {
+  if (status === "saving") return "Syncing";
+  if (status === "synced") return "Synced";
+  if (status === "error") return "Sync issue";
+  return "Saved locally";
+}
 
 function getLocalDateString(date: Date) {
   const year = date.getFullYear();
@@ -182,16 +219,11 @@ function formatTrend(diff: number | undefined) {
 }
 
 export default function App() {
-  const [entries, setEntries] = useState<EntriesMap>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [entries, setEntries] = useState<EntriesMap>(() => loadLocalEntries());
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("calories");
-  const [saveStatus, setSaveStatus] = useState<"saved" | "saving">("saved");
+  const [saveStatus, setSaveStatus] = useState<"local" | "saving" | "synced" | "error">("local");
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const todayKey = getLocalDateString(today);
@@ -199,11 +231,97 @@ export default function App() {
   const [viewMonth, setViewMonth] = useState(getMonthStart(today));
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    setSaveStatus("saving");
-    const timer = window.setTimeout(() => setSaveStatus("saved"), 500);
-    return () => window.clearTimeout(timer);
-  }, [entries]);
+    let cancelled = false;
+    let unsubscribeEntries: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (cancelled) return;
+      unsubscribeEntries?.();
+      unsubscribeEntries = undefined;
+      setUser(currentUser);
+      setAuthReady(true);
+
+      if (!currentUser) {
+        setEntries(loadLocalEntries());
+        setSaveStatus("local");
+        return;
+      }
+
+      setSaveStatus("saving");
+
+      try {
+        const snapshot = await getDocs(collection(db, "users", currentUser.uid, "entries"));
+        const cloudEntries: EntriesMap = {};
+
+        snapshot.forEach((entryDoc) => {
+          const data = entryDoc.data();
+          cloudEntries[entryDoc.id] = {
+            ...(typeof data.calories === "number" ? { calories: data.calories } : {}),
+            ...(typeof data.protein === "number" ? { protein: data.protein } : {}),
+            ...(typeof data.weight === "number" ? { weight: data.weight } : {}),
+            ...(typeof data.notes === "string" ? { notes: data.notes } : {}),
+          };
+        });
+
+        const localEntries = {
+          ...loadLocalEntries(),
+          ...loadLocalEntries(getUserStorageKey(currentUser.uid)),
+        };
+        const localOnlyEntries = Object.entries(localEntries).filter(([dateKey]) => !cloudEntries[dateKey]);
+
+        await Promise.all(
+          localOnlyEntries.map(([dateKey, entry]) =>
+            setDoc(doc(db, "users", currentUser.uid, "entries", dateKey), {
+              ...cleanEntry(entry),
+              updatedAt: serverTimestamp(),
+            }),
+          ),
+        );
+
+        if (cancelled || auth.currentUser?.uid !== currentUser.uid) return;
+
+        const mergedEntries = { ...localEntries, ...cloudEntries };
+        setEntries(mergedEntries);
+        localStorage.setItem(getUserStorageKey(currentUser.uid), JSON.stringify(mergedEntries));
+        localStorage.removeItem(STORAGE_KEY);
+        setSaveStatus("synced");
+
+        unsubscribeEntries = onSnapshot(
+          collection(db, "users", currentUser.uid, "entries"),
+          (liveSnapshot) => {
+            const liveEntries: EntriesMap = {};
+
+            liveSnapshot.forEach((entryDoc) => {
+              const data = entryDoc.data();
+              liveEntries[entryDoc.id] = {
+                ...(typeof data.calories === "number" ? { calories: data.calories } : {}),
+                ...(typeof data.protein === "number" ? { protein: data.protein } : {}),
+                ...(typeof data.weight === "number" ? { weight: data.weight } : {}),
+                ...(typeof data.notes === "string" ? { notes: data.notes } : {}),
+              };
+            });
+
+            setEntries(liveEntries);
+            localStorage.setItem(getUserStorageKey(currentUser.uid), JSON.stringify(liveEntries));
+            setSaveStatus("synced");
+          },
+          (error) => {
+            console.error("Unable to receive journal updates", error);
+            setSaveStatus("error");
+          },
+        );
+      } catch (error) {
+        console.error("Unable to sync journal entries", error);
+        setSaveStatus("error");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribeAuth();
+      unsubscribeEntries?.();
+    };
+  }, []);
 
   const selectedEntry = getDayEntry(entries, selectedDay);
   const averageWeight = getAverage(entries, selectedDay, 7, "weight");
@@ -212,11 +330,35 @@ export default function App() {
   const weightTrend = getWeightTrend(entries, selectedDay);
   const isToday = selectedDay === todayKey;
 
+  function saveEntry(dateKey: string, entry: DayEntry) {
+    const cleanedEntry = cleanEntry(entry);
+    const storageKey = user ? getUserStorageKey(user.uid) : STORAGE_KEY;
+
+    setEntries((previous) => {
+      const nextEntries = { ...previous, [dateKey]: cleanedEntry };
+      localStorage.setItem(storageKey, JSON.stringify(nextEntries));
+      return nextEntries;
+    });
+
+    if (!user) {
+      setSaveStatus("local");
+      return;
+    }
+
+    setSaveStatus("saving");
+    setDoc(doc(db, "users", user.uid, "entries", dateKey), {
+      ...cleanedEntry,
+      updatedAt: serverTimestamp(),
+    })
+      .then(() => setSaveStatus("synced"))
+      .catch((error) => {
+        console.error("Unable to save journal entry", error);
+        setSaveStatus("error");
+      });
+  }
+
   function updateSelectedEntry(patch: Partial<DayEntry>) {
-    setEntries((previous) => ({
-      ...previous,
-      [selectedDay]: { ...getDayEntry(previous, selectedDay), ...patch },
-    }));
+    saveEntry(selectedDay, { ...selectedEntry, ...patch });
   }
 
   function updateNumber(field: "calories" | "protein" | "weight", value: string) {
@@ -233,7 +375,27 @@ export default function App() {
   }
 
   function clearSelectedDay() {
-    setEntries((previous) => ({ ...previous, [selectedDay]: {} }));
+    const storageKey = user ? getUserStorageKey(user.uid) : STORAGE_KEY;
+
+    setEntries((previous) => {
+      const nextEntries = { ...previous };
+      delete nextEntries[selectedDay];
+      localStorage.setItem(storageKey, JSON.stringify(nextEntries));
+      return nextEntries;
+    });
+
+    if (!user) {
+      setSaveStatus("local");
+      return;
+    }
+
+    setSaveStatus("saving");
+    deleteDoc(doc(db, "users", user.uid, "entries", selectedDay))
+      .then(() => setSaveStatus("synced"))
+      .catch((error) => {
+        console.error("Unable to clear journal entry", error);
+        setSaveStatus("error");
+      });
   }
 
   function goToToday() {
@@ -246,6 +408,17 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function handleSignIn() {
+    signInWithPopup(auth, googleProvider).catch((error) => {
+      console.error("Unable to sign in with Google", error);
+      setSaveStatus("error");
+    });
+  }
+
+  function handleSignOut() {
+    signOut(auth).catch((error) => console.error("Unable to sign out", error));
+  }
+
   return (
     <main className="app-shell">
       <div className="app-layout">
@@ -254,9 +427,22 @@ export default function App() {
             <p className="eyebrow">Daily nutrition tracker</p>
             <h1>Macro Journal</h1>
           </div>
-          <div className={`save-status ${saveStatus}`}>
-            <span />
-            {saveStatus === "saving" ? "Saving" : "Saved locally"}
+          <div className="account-controls">
+            <div className={`save-status ${saveStatus}`}>
+              <span />
+              {getSaveStatusLabel(saveStatus)}
+            </div>
+            {authReady && (
+              user ? (
+                <button className="account-btn" onClick={handleSignOut} title={user.email ?? "Signed in"}>
+                  Sign out
+                </button>
+              ) : (
+                <button className="account-btn primary" onClick={handleSignIn}>
+                  Sign in with Google
+                </button>
+              )
+            )}
           </div>
         </header>
 
@@ -311,7 +497,7 @@ export default function App() {
           </details>
 
           <div className="entry-footer">
-            <p>Changes save automatically on this device.</p>
+            <p>{user ? `Syncing as ${user.email ?? "your Google account"}.` : "Sign in to sync across devices."}</p>
             <button className="danger-btn" onClick={clearSelectedDay}>
               Clear entry
             </button>
