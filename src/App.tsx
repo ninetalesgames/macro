@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, type User } from "firebase/auth";
 import {
   collection,
   deleteDoc,
@@ -430,10 +430,6 @@ export default function App() {
     });
   }
 
-  function handleSignOut() {
-    signOut(auth).catch((error) => console.error("Unable to sign out", error));
-  }
-
   async function saveGoals(nextGoals: Goals) {
     if (!user) return;
     await setDoc(doc(db, "users", user.uid, "settings", "goals"), {
@@ -495,7 +491,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${activeTab === "coach" ? "coach-active" : ""}`}>
       <div className="app-layout">
         <header className="app-header">
           <div>
@@ -507,16 +503,10 @@ export default function App() {
               <span />
               {getSaveStatusLabel(saveStatus)}
             </div>
-            {authReady && (
-              user ? (
-                <button className="account-btn" onClick={handleSignOut} title={user.email ?? "Signed in"}>
-                  Sign out
-                </button>
-              ) : (
+            {authReady && !user && (
                 <button className="account-btn primary" onClick={handleSignIn}>
                   Sign in with Google
                 </button>
-              )
             )}
           </div>
         </header>

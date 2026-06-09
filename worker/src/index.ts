@@ -168,6 +168,7 @@ You may propose meal logs, weight logs, or calorie/protein goal changes, but nev
 Nutrition values are estimates. When portions or brands are unclear, state that in uncertainty.
 Meal proposals add to a day's existing totals. Weight proposals replace that day's weight.
 Meal proposal summaries must preserve the actual foods, quantities, brands, and preparation details the user states, for example "700g diced lean beef".
+Every meal proposal MUST contain non-null integer estimates for both calories and protein. Make a reasonable estimate even when the transcript is not English or portions are uncertain, and explain uncertainty rather than leaving either value null.
 Goal changes require both calorieTarget and proteinTarget. Default proposal dates to ${payload.today}, unless the user states another date.
 For recovery, fatigue, or performance questions, analyze recent calories, protein, weight trend, notes, and meal patterns. Explain possible diet relationships while also mentioning non-diet factors such as sleep, hydration, training load, stress, and illness when relevant. Do not diagnose medical conditions.
 Return no proposal for ordinary advice or questions. Dates must be YYYY-MM-DD.`;
@@ -182,6 +183,28 @@ Return no proposal for ordinary advice or questions. Dates must be YYYY-MM-DD.`;
     userMessage: payload.message,
   };
 
+  let result = await requestCoachResponse(instructions, context, apiKey);
+
+  if (hasIncompleteMeal(result)) {
+    result = await requestCoachResponse(
+      `${instructions}
+Your previous response contained a meal proposal with blank calories or protein. Correct it now: every meal proposal must include your best integer estimate for both values.`,
+      context,
+      apiKey,
+    );
+  }
+
+  if (hasIncompleteMeal(result)) throw new Error("Could not estimate calories and protein for this meal. Please include foods and approximate amounts.");
+  return result;
+}
+
+function hasIncompleteMeal(result: CoachResult) {
+  return result.proposals.some((proposal) =>
+    proposal.type === "meal" && (typeof proposal.calories !== "number" || typeof proposal.protein !== "number"),
+  );
+}
+
+async function requestCoachResponse(instructions: string, context: object, apiKey: string): Promise<CoachResult> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -202,7 +225,6 @@ Return no proposal for ordinary advice or questions. Dates must be YYYY-MM-DD.`;
       },
     }),
   });
-
   const data = await response.json<{
     output_text?: string;
     output?: Array<{ content?: Array<{ text?: string }> }>;

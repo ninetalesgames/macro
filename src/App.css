@@ -786,6 +786,24 @@ h2 {
     justify-content: space-between;
   }
 
+  .app-shell.coach-active {
+    height: 100dvh;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .coach-active .app-layout {
+    height: 100%;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .coach-active .coach-layout {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .entry-panel,
   .calendar-panel,
   .coach-intro,
@@ -819,8 +837,8 @@ h2 {
   }
 
   .chat-panel {
-    height: calc(100dvh - 148px);
-    min-height: 360px;
+    height: 100%;
+    min-height: 0;
     margin-inline: -10px;
     padding: 8px 8px max(8px, env(safe-area-inset-bottom));
     border-right: 0;
