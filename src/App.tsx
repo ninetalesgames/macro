@@ -10,10 +10,10 @@ type DayEntry = {
 
 type EntriesMap = Record<string, DayEntry>;
 type CalendarMode = "calories" | "protein" | "weight";
-type QuickField = "calories" | "protein" | "weight";
 
 const DEFAULT_CALORIE_TARGET = 2100;
 const DEFAULT_PROTEIN_TARGET = 160;
+const STORAGE_KEY = "macro-journal-v2-entries";
 
 function getLocalDateString(date: Date) {
   const year = date.getFullYear();
@@ -54,35 +54,17 @@ function addMonths(date: Date, amount: number) {
   return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
-function isSameMonth(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function getWeekdayHeaders() {
-  return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-}
-
 function getMonthGrid(viewMonth: Date) {
   const start = getMonthStart(viewMonth);
   const end = getMonthEnd(viewMonth);
-
-  const jsDay = start.getDay();
-  const mondayIndex = jsDay === 0 ? 6 : jsDay - 1;
-
-  const grid: (Date | null)[] = [];
-
-  for (let i = 0; i < mondayIndex; i++) {
-    grid.push(null);
-  }
+  const mondayIndex = start.getDay() === 0 ? 6 : start.getDay() - 1;
+  const grid: (Date | null)[] = Array.from({ length: mondayIndex }, () => null);
 
   for (let day = 1; day <= end.getDate(); day++) {
     grid.push(new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day));
   }
 
-  while (grid.length % 7 !== 0) {
-    grid.push(null);
-  }
-
+  while (grid.length % 7 !== 0) grid.push(null);
   return grid;
 }
 
@@ -90,70 +72,46 @@ function getDayEntry(entries: EntriesMap, dateKey: string): DayEntry {
   return entries[dateKey] ?? {};
 }
 
-function getAverageWeight(entries: EntriesMap, endDateKey: string, days: number) {
+function getAverage(
+  entries: EntriesMap,
+  endDateKey: string,
+  days: number,
+  field: "calories" | "protein" | "weight",
+) {
   const endDate = parseDateKey(endDateKey);
   const values: number[] = [];
 
   for (let i = 0; i < days; i++) {
     const date = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - i);
-    const key = getLocalDateString(date);
-    const weight = entries[key]?.weight;
-
-    if (typeof weight === "number" && !Number.isNaN(weight)) {
-      values.push(weight);
-    }
+    const value = entries[getLocalDateString(date)]?.[field];
+    if (typeof value === "number" && !Number.isNaN(value)) values.push(value);
   }
 
   if (values.length === 0) return undefined;
-
-  const total = values.reduce((sum, value) => sum + value, 0);
-  return total / values.length;
-}
-
-function getAverageNumber(entries: EntriesMap, endDateKey: string, days: number, field: "calories" | "protein") {
-  const endDate = parseDateKey(endDateKey);
-  const values: number[] = [];
-
-  for (let i = 0; i < days; i++) {
-    const date = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - i);
-    const key = getLocalDateString(date);
-    const value = entries[key]?.[field];
-
-    if (typeof value === "number" && !Number.isNaN(value)) {
-      values.push(value);
-    }
-  }
-
-  if (values.length === 0) return undefined;
-
-  const total = values.reduce((sum, value) => sum + value, 0);
-  return total / values.length;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function getWeightTrend(entries: EntriesMap, endDateKey: string) {
-  const currentAvg = getAverageWeight(entries, endDateKey, 7);
-
+  const currentAvg = getAverage(entries, endDateKey, 7, "weight");
   const earlierEnd = parseDateKey(endDateKey);
   earlierEnd.setDate(earlierEnd.getDate() - 7);
-  const earlierAvg = getAverageWeight(entries, getLocalDateString(earlierEnd), 7);
+  const earlierAvg = getAverage(entries, getLocalDateString(earlierEnd), 7, "weight");
 
   if (currentAvg === undefined || earlierAvg === undefined) {
     return {
       diff: undefined as number | undefined,
       label: "Need more logs",
-      description: "Log weight across at least two weeks to see a real trend",
+      description: "Log weight across two weeks to see a trend",
       tone: "empty",
     };
   }
 
   const diff = Number((currentAvg - earlierAvg).toFixed(2));
-  const absDiff = Math.abs(diff);
-
-  if (absDiff < 0.15) {
+  if (Math.abs(diff) < 0.15) {
     return {
       diff,
       label: "Stable",
-      description: `${diff > 0 ? "+" : ""}${diff.toFixed(2)} kg vs previous 7 day average`,
+      description: "Compared with the previous 7 days",
       tone: "maintain",
     };
   }
@@ -161,14 +119,9 @@ function getWeightTrend(entries: EntriesMap, endDateKey: string) {
   return {
     diff,
     label: diff > 0 ? "Trending up" : "Trending down",
-    description: `${diff > 0 ? "+" : ""}${diff.toFixed(2)} kg vs previous 7 day average`,
+    description: "Compared with the previous 7 days",
     tone: diff > 0 ? "bulk" : "cut",
   };
-}
-
-function formatWeight(value: number | undefined) {
-  if (value === undefined) return "—";
-  return `${value.toFixed(1)} kg`;
 }
 
 function toneClass(tone: string) {
@@ -178,159 +131,109 @@ function toneClass(tone: string) {
   return "tone-empty";
 }
 
-function getCalorieTone(calories: number | undefined, calorieTarget: number) {
-  if (calories === undefined) return "empty";
-
-  const cutThreshold = calorieTarget - 150;
-  const bulkThreshold = calorieTarget + 150;
-
-  if (calories <= cutThreshold) return "cut";
-  if (calories >= bulkThreshold) return "bulk";
-  return "maintain";
-}
-
-function getProteinTone(protein: number | undefined, proteinTarget: number) {
-  if (protein === undefined) return "empty";
-
-  if (protein >= proteinTarget) return "cut";
-  if (protein >= proteinTarget * 0.8) return "maintain";
-  return "bulk";
-}
-
 function getPreviousLoggedWeight(entries: EntriesMap, dateKey: string) {
   const base = parseDateKey(dateKey);
-
   for (let i = 1; i <= 30; i++) {
-    const prev = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i);
-    const key = getLocalDateString(prev);
-    const weight = entries[key]?.weight;
-
-    if (typeof weight === "number" && !Number.isNaN(weight)) {
-      return weight;
-    }
+    const previous = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i);
+    const weight = entries[getLocalDateString(previous)]?.weight;
+    if (typeof weight === "number" && !Number.isNaN(weight)) return weight;
   }
-
   return undefined;
-}
-
-function getWeightTone(weight: number | undefined, previousWeight: number | undefined) {
-  if (weight === undefined) return "empty";
-  if (previousWeight === undefined) return "maintain";
-
-  const diff = Number((weight - previousWeight).toFixed(1));
-
-  if (diff <= -0.2) return "cut";
-  if (diff >= 0.2) return "bulk";
-  return "maintain";
 }
 
 function getCalendarTone(
   mode: CalendarMode,
   entry: DayEntry,
-  calorieTarget: number,
-  proteinTarget: number,
   entries: EntriesMap,
-  dateKey: string
+  dateKey: string,
 ) {
   if (mode === "calories") {
-    return getCalorieTone(entry.calories, calorieTarget);
+    if (entry.calories === undefined) return "empty";
+    if (entry.calories <= DEFAULT_CALORIE_TARGET - 150) return "cut";
+    if (entry.calories >= DEFAULT_CALORIE_TARGET + 150) return "bulk";
+    return "maintain";
   }
 
   if (mode === "protein") {
-    return getProteinTone(entry.protein, proteinTarget);
+    if (entry.protein === undefined) return "empty";
+    if (entry.protein >= DEFAULT_PROTEIN_TARGET) return "cut";
+    if (entry.protein >= DEFAULT_PROTEIN_TARGET * 0.8) return "maintain";
+    return "bulk";
   }
 
-  return getWeightTone(entry.weight, getPreviousLoggedWeight(entries, dateKey));
+  if (entry.weight === undefined) return "empty";
+  const previousWeight = getPreviousLoggedWeight(entries, dateKey);
+  if (previousWeight === undefined) return "maintain";
+  const difference = Number((entry.weight - previousWeight).toFixed(1));
+  if (difference <= -0.2) return "cut";
+  if (difference >= 0.2) return "bulk";
+  return "maintain";
 }
 
 function getCalendarLabel(mode: CalendarMode, entry: DayEntry) {
-  if (mode === "calories") {
-    return entry.calories === undefined ? "No log" : `${entry.calories} kcal`;
-  }
+  if (mode === "calories") return entry.calories === undefined ? "No log" : `${entry.calories}`;
+  if (mode === "protein") return entry.protein === undefined ? "No log" : `${entry.protein}g`;
+  return entry.weight === undefined ? "No log" : `${entry.weight.toFixed(1)}kg`;
+}
 
-  if (mode === "protein") {
-    return entry.protein === undefined ? "No log" : `${entry.protein} g`;
-  }
-
-  return entry.weight === undefined ? "No log" : `${entry.weight.toFixed(1)} kg`;
+function formatTrend(diff: number | undefined) {
+  if (diff === undefined) return "--";
+  return `${diff > 0 ? "+" : ""}${diff.toFixed(2)} kg`;
 }
 
 export default function App() {
   const [entries, setEntries] = useState<EntriesMap>(() => {
-    const saved = localStorage.getItem("macro-journal-v2-entries");
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
   });
-
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("calories");
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving">("saved");
 
   const today = useMemo(() => new Date(), []);
   const todayKey = getLocalDateString(today);
-
-  const [selectedDay, setSelectedDay] = useState<string>(todayKey);
-  const [viewMonth, setViewMonth] = useState<Date>(getMonthStart(today));
-
-  const [quickField, setQuickField] = useState<QuickField | null>(null);
-  const [quickValue, setQuickValue] = useState("");
+  const [selectedDay, setSelectedDay] = useState(todayKey);
+  const [viewMonth, setViewMonth] = useState(getMonthStart(today));
 
   useEffect(() => {
-    localStorage.setItem("macro-journal-v2-entries", JSON.stringify(entries));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    setSaveStatus("saving");
+    const timer = window.setTimeout(() => setSaveStatus("saved"), 500);
+    return () => window.clearTimeout(timer);
   }, [entries]);
 
   const selectedEntry = getDayEntry(entries, selectedDay);
-
-  const sevenDayAverageWeight = getAverageWeight(entries, selectedDay, 7);
-  const sevenDayAverageCalories = getAverageNumber(entries, selectedDay, 7, "calories");
-  const sevenDayAverageProtein = getAverageNumber(entries, selectedDay, 7, "protein");
+  const averageWeight = getAverage(entries, selectedDay, 7, "weight");
+  const averageCalories = getAverage(entries, selectedDay, 7, "calories");
+  const averageProtein = getAverage(entries, selectedDay, 7, "protein");
   const weightTrend = getWeightTrend(entries, selectedDay);
-
-  const monthGrid = getMonthGrid(viewMonth);
+  const isToday = selectedDay === todayKey;
 
   function updateSelectedEntry(patch: Partial<DayEntry>) {
-    setEntries((prev) => ({
-      ...prev,
-      [selectedDay]: {
-        ...getDayEntry(prev, selectedDay),
-        ...patch,
-      },
+    setEntries((previous) => ({
+      ...previous,
+      [selectedDay]: { ...getDayEntry(previous, selectedDay), ...patch },
     }));
   }
 
-  function clearSelectedDay() {
-    setEntries((prev) => ({
-      ...prev,
-      [selectedDay]: {
-        notes: "",
-      },
-    }));
-  }
-
-  function openQuickModal(field: QuickField) {
-    const currentValue = selectedEntry[field];
-    setQuickField(field);
-    setQuickValue(
-      typeof currentValue === "number" && !Number.isNaN(currentValue) ? String(currentValue) : ""
-    );
-  }
-
-  function closeQuickModal() {
-    setQuickField(null);
-    setQuickValue("");
-  }
-
-  function saveQuickModal() {
-    if (!quickField) return;
-
-    const raw = Number(quickValue);
-
-    if (quickValue.trim() === "" || Number.isNaN(raw)) {
-      updateSelectedEntry({ [quickField]: undefined });
-      closeQuickModal();
+  function updateNumber(field: "calories" | "protein" | "weight", value: string) {
+    if (value === "") {
+      updateSelectedEntry({ [field]: undefined });
       return;
     }
 
-    const cleanValue = quickField === "weight" ? Number(raw.toFixed(1)) : Math.max(0, Math.round(raw));
-    updateSelectedEntry({ [quickField]: cleanValue });
-    closeQuickModal();
+    const number = Number(value);
+    if (Number.isNaN(number)) return;
+    updateSelectedEntry({
+      [field]: field === "weight" ? Number(number.toFixed(1)) : Math.max(0, Math.round(number)),
+    });
+  }
+
+  function clearSelectedDay() {
+    setEntries((previous) => ({ ...previous, [selectedDay]: {} }));
   }
 
   function goToToday() {
@@ -339,302 +242,203 @@ export default function App() {
   }
 
   function selectCalendarDay(date: Date) {
-    const key = getLocalDateString(date);
-    setSelectedDay(key);
-
-    if (!isSameMonth(viewMonth, date)) {
-      setViewMonth(getMonthStart(date));
-    }
+    setSelectedDay(getLocalDateString(date));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
-    <div className="app-shell">
+    <main className="app-shell">
       <div className="app-layout">
-        <section className="panel hero-panel">
-          <div className="hero-header">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Daily nutrition tracker</p>
+            <h1>Macro Journal</h1>
+          </div>
+          <div className={`save-status ${saveStatus}`}>
+            <span />
+            {saveStatus === "saving" ? "Saving" : "Saved locally"}
+          </div>
+        </header>
+
+        <section className="panel entry-panel">
+          <div className="section-header">
             <div>
-              <h1 className="app-title">Macro Journal</h1>
-              <p className="app-subtitle">
-                Log one clean set of numbers each day, track your weekly averages, and click any day
-                in the calendar to edit it later.
-              </p>
+              <p className="eyebrow">{isToday ? "Today" : "Selected day"}</p>
+              <h2>{formatLongDate(selectedDay)}</h2>
             </div>
+            {!isToday && (
+              <button className="text-btn" onClick={goToToday}>
+                Back to today
+              </button>
+            )}
           </div>
 
-          <div className="quick-actions-grid">
-            <button className="primary-btn" onClick={() => openQuickModal("calories")}>
-              Add calories
-            </button>
-            <button className="primary-btn" onClick={() => openQuickModal("protein")}>
-              Add protein
-            </button>
-            <button className="primary-btn" onClick={() => openQuickModal("weight")}>
-              Add weight
-            </button>
+          <div className="entry-grid">
+            <NumberField
+              label="Calories"
+              unit="kcal"
+              value={selectedEntry.calories}
+              placeholder="2100"
+              onChange={(value) => updateNumber("calories", value)}
+            />
+            <NumberField
+              label="Protein"
+              unit="g"
+              value={selectedEntry.protein}
+              placeholder="160"
+              onChange={(value) => updateNumber("protein", value)}
+            />
+            <NumberField
+              label="Weight"
+              unit="kg"
+              value={selectedEntry.weight}
+              placeholder="83.4"
+              step="0.1"
+              onChange={(value) => updateNumber("weight", value)}
+            />
           </div>
 
-          <div className="summary-grid">
-            <SummaryCard
-              title="7 day average weight"
-              value={formatWeight(sevenDayAverageWeight)}
-              subtitle="Best signal for real progress"
+          <details className="notes-details" open={Boolean(selectedEntry.notes)}>
+            <summary>
+              <span>Notes</span>
+              <span className="notes-preview">{selectedEntry.notes ? "Added" : "Optional"}</span>
+            </summary>
+            <textarea
+              value={selectedEntry.notes ?? ""}
+              onChange={(event) => updateSelectedEntry({ notes: event.target.value })}
+              placeholder="Training, sleep, meals, or anything worth remembering."
             />
-            <SummaryCard
-              title="7 day calorie average"
-              value={sevenDayAverageCalories === undefined ? "—" : `${Math.round(sevenDayAverageCalories)} kcal`}
-              subtitle="Average across logged days"
-            />
-            <SummaryCard
-              title="7 day protein average"
-              value={sevenDayAverageProtein === undefined ? "—" : `${Math.round(sevenDayAverageProtein)} g`}
-              subtitle="Average across logged days"
-            />
-            <SummaryCard
-              title="Weight trend"
-              value={weightTrend.diff === undefined ? "—" : `${weightTrend.diff > 0 ? "+" : ""}${weightTrend.diff.toFixed(2)} kg`}
-              subtitle={weightTrend.description}
-              tone={weightTrend.tone}
-            />
+          </details>
+
+          <div className="entry-footer">
+            <p>Changes save automatically on this device.</p>
+            <button className="danger-btn" onClick={clearSelectedDay}>
+              Clear entry
+            </button>
           </div>
         </section>
 
+        <section className="stats-strip" aria-label="Seven day averages">
+          <Stat label="Weight avg" value={averageWeight === undefined ? "--" : `${averageWeight.toFixed(1)} kg`} />
+          <Stat label="Calorie avg" value={averageCalories === undefined ? "--" : `${Math.round(averageCalories)}`} />
+          <Stat label="Protein avg" value={averageProtein === undefined ? "--" : `${Math.round(averageProtein)}g`} />
+          <Stat label={weightTrend.label} value={formatTrend(weightTrend.diff)} tone={weightTrend.tone} />
+        </section>
+
         <section className="panel calendar-panel">
-          <div className="calendar-header">
+          <div className="section-header calendar-heading">
             <div>
-              <h2 className="section-title">{formatMonthYear(viewMonth)}</h2>
-              <p className="section-subtitle">
-                Green = cutting zone, yellow = maintenance zone, red = bulking zone.
-              </p>
+              <p className="eyebrow">History</p>
+              <h2>{formatMonthYear(viewMonth)}</h2>
             </div>
-
-            <div className="calendar-controls">
-              <button
-                className={`calendar-mode-btn ${calendarMode === "calories" ? "active" : ""}`}
-                onClick={() => setCalendarMode("calories")}
-              >
-                Calories
-              </button>
-              <button
-                className={`calendar-mode-btn ${calendarMode === "protein" ? "active" : ""}`}
-                onClick={() => setCalendarMode("protein")}
-              >
-                Protein
-              </button>
-              <button
-                className={`calendar-mode-btn ${calendarMode === "weight" ? "active" : ""}`}
-                onClick={() => setCalendarMode("weight")}
-              >
-                Weight
-              </button>
-            </div>
-          </div>
-
-          <div className="calendar-topbar">
             <div className="month-nav">
-              <button className="secondary-btn" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>
-                Previous
+              <button aria-label="Previous month" onClick={() => setViewMonth(addMonths(viewMonth, -1))}>
+                Prev
               </button>
-              <button className="secondary-btn" onClick={goToToday}>
-                Today
-              </button>
-              <button className="secondary-btn" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>
+              <button onClick={goToToday}>Today</button>
+              <button aria-label="Next month" onClick={() => setViewMonth(addMonths(viewMonth, 1))}>
                 Next
               </button>
             </div>
           </div>
 
+          <div className="mode-switcher">
+            {(["calories", "protein", "weight"] as CalendarMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={calendarMode === mode ? "active" : ""}
+                onClick={() => setCalendarMode(mode)}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+
           <div className="calendar-grid">
-            {getWeekdayHeaders().map((day) => (
-              <div key={day} className="weekday-label">
+            {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
+              <div key={`${day}-${index}`} className="weekday-label">
                 {day}
               </div>
             ))}
 
-            {monthGrid.map((date, index) => {
-              if (!date) {
-                return <div key={`empty-${index}`} className="calendar-spacer" />;
-              }
-
+            {getMonthGrid(viewMonth).map((date, index) => {
+              if (!date) return <div key={`empty-${index}`} className="calendar-spacer" />;
               const dateKey = getLocalDateString(date);
               const entry = getDayEntry(entries, dateKey);
-              const tone = getCalendarTone(
-                calendarMode,
-                entry,
-                DEFAULT_CALORIE_TARGET,
-                DEFAULT_PROTEIN_TARGET,
-                entries,
-                dateKey
-              );
-
-              const isSelected = dateKey === selectedDay;
-              const isToday = dateKey === todayKey;
+              const tone = getCalendarTone(calendarMode, entry, entries, dateKey);
 
               return (
                 <button
                   key={dateKey}
                   onClick={() => selectCalendarDay(date)}
-                  className={`calendar-day ${toneClass(tone)} ${isSelected ? "selected" : ""} ${isToday ? "today" : ""}`}
-                  title={`${formatLongDate(dateKey)}`}
+                  className={`calendar-day ${toneClass(tone)} ${dateKey === selectedDay ? "selected" : ""} ${dateKey === todayKey ? "today" : ""}`}
+                  title={formatLongDate(dateKey)}
                 >
-                  <div className="calendar-day-number">{date.getDate()}</div>
-                  <div className="calendar-day-footer">
-                    <div className="calendar-day-value">{getCalendarLabel(calendarMode, entry)}</div>
-                  </div>
+                  <span>{date.getDate()}</span>
+                  <strong>{getCalendarLabel(calendarMode, entry)}</strong>
                 </button>
               );
             })}
           </div>
-        </section>
 
-        <section className="panel editor-panel">
-          <div className="editor-header">
-            <div>
-              <h2 className="section-title">Edit selected day</h2>
-              <p className="section-subtitle">{formatLongDate(selectedDay)}</p>
-            </div>
-
-            <button className="danger-btn" onClick={clearSelectedDay}>
-              Clear numbers
-            </button>
+          <div className="legend">
+            <span><i className="cut-dot" />Cut / target</span>
+            <span><i className="maintain-dot" />Maintain</span>
+            <span><i className="bulk-dot" />Bulk / below target</span>
           </div>
-
-          <div className="editor-grid">
-            <label className="field-group">
-              <span className="field-label">Calories</span>
-              <input
-                className="text-input"
-                type="number"
-                value={selectedEntry.calories ?? ""}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  updateSelectedEntry({
-                    calories: value === "" ? undefined : Math.max(0, Math.round(Number(value) || 0)),
-                  });
-                }}
-                placeholder="e.g. 2150"
-              />
-            </label>
-
-            <label className="field-group">
-              <span className="field-label">Protein (g)</span>
-              <input
-                className="text-input"
-                type="number"
-                value={selectedEntry.protein ?? ""}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  updateSelectedEntry({
-                    protein: value === "" ? undefined : Math.max(0, Math.round(Number(value) || 0)),
-                  });
-                }}
-                placeholder="e.g. 180"
-              />
-            </label>
-
-            <label className="field-group">
-              <span className="field-label">Weight (kg)</span>
-              <input
-                className="text-input"
-                type="number"
-                step="0.1"
-                value={selectedEntry.weight ?? ""}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  updateSelectedEntry({
-                    weight: value === "" ? undefined : Number((Number(value) || 0).toFixed(1)),
-                  });
-                }}
-                placeholder="e.g. 83.4"
-              />
-            </label>
-
-            <div className={`editor-stat-card ${toneClass(weightTrend.tone)}`}>
-              <div className="editor-stat-title">Weight trend</div>
-              <div className="editor-stat-value">
-                {weightTrend.diff === undefined ? "—" : `${weightTrend.diff > 0 ? "+" : ""}${weightTrend.diff.toFixed(2)} kg`}
-              </div>
-              <div className="editor-stat-subtitle">{weightTrend.description}</div>
-            </div>
-          </div>
-
-          <label className="field-group notes-group">
-            <span className="field-label">Notes</span>
-            <textarea
-              className="text-area"
-              value={selectedEntry.notes ?? ""}
-              onChange={(e) => updateSelectedEntry({ notes: e.target.value })}
-              placeholder="Optional notes. Tennis day, takeaway, low sleep, anything useful."
-            />
-          </label>
         </section>
       </div>
-
-      {quickField && (
-        <div className="modal-overlay" onClick={closeQuickModal}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">
-                {quickField === "calories"
-                  ? "Add calories"
-                  : quickField === "protein"
-                  ? "Add protein"
-                  : "Add weight"}
-              </h3>
-              <p className="modal-subtitle">{formatLongDate(selectedDay)}</p>
-            </div>
-
-            <div className="modal-fields">
-              <label className="field-group">
-                <span className="field-label">
-                  {quickField === "calories"
-                    ? "Calories"
-                    : quickField === "protein"
-                    ? "Protein (g)"
-                    : "Weight (kg)"}
-                </span>
-                <input
-                  className="text-input"
-                  type="number"
-                  step={quickField === "weight" ? "0.1" : "1"}
-                  value={quickValue}
-                  onChange={(e) => setQuickValue(e.target.value)}
-                  placeholder={quickField === "weight" ? "0.0" : "0"}
-                  autoFocus
-                />
-              </label>
-            </div>
-
-            <div className="modal-actions">
-              <button className="secondary-btn" onClick={closeQuickModal}>
-                Cancel
-              </button>
-              <button className="primary-btn" onClick={saveQuickModal}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }
 
-function SummaryCard({
-  title,
+function NumberField({
+  label,
+  unit,
   value,
-  subtitle,
-  tone,
+  placeholder,
+  step = "1",
+  onChange,
 }: {
-  title: string;
+  label: string;
+  unit: string;
+  value: number | undefined;
+  placeholder: string;
+  step?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="number-field">
+      <span>{label}</span>
+      <div>
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step={step}
+          value={value ?? ""}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <b>{unit}</b>
+      </div>
+    </label>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone = "empty",
+}: {
+  label: string;
   value: string;
-  subtitle: string;
   tone?: string;
 }) {
   return (
-    <div className={`summary-card ${tone ? toneClass(tone) : ""}`}>
-      <div className="summary-card-title">{title}</div>
-      <div className="summary-card-value">{value}</div>
-      <div className="summary-card-subtitle">{subtitle}</div>
+    <div className={`stat ${toneClass(tone)}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
