@@ -57,6 +57,8 @@ export default function Coach({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const discardRecordingRef = useRef(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     async function loadMemory() {
@@ -93,6 +95,14 @@ export default function Coach({
     const timer = window.setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [status]);
+
+  useEffect(() => {
+    const scrollArea = chatScrollRef.current;
+    if (!scrollArea) return;
+    window.requestAnimationFrame(() => {
+      scrollArea.scrollTo({ top: scrollArea.scrollHeight, behavior: "smooth" });
+    });
+  }, [messages, proposals, status]);
 
   const contextEntries = useMemo(() => {
     const cutoff = new Date();
@@ -183,9 +193,16 @@ export default function Coach({
       recorder.ondataavailable = (event) => chunksRef.current.push(event.data);
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          chunksRef.current = [];
+          setStatus("idle");
+          return;
+        }
         void submitAudio(new Blob(chunksRef.current, { type: recorder.mimeType }));
       };
       recorderRef.current = recorder;
+      discardRecordingRef.current = false;
       setRecordingSeconds(0);
       setStatus("recording");
       recorder.start();
@@ -198,6 +215,12 @@ export default function Coach({
     recorderRef.current?.stop();
     recorderRef.current = null;
     setStatus("working");
+  }
+
+  function cancelRecording() {
+    discardRecordingRef.current = true;
+    recorderRef.current?.stop();
+    recorderRef.current = null;
   }
 
   async function submitAudio(audio: Blob) {
@@ -245,60 +268,89 @@ export default function Coach({
       </div>
 
       <div className="panel chat-panel">
-        <div className="chat-messages">
-          {messages.length === 0 && (
-            <div className="empty-chat">Try: “I ate chicken, rice and broccoli for dinner” or “How has my protein been this week?”</div>
-          )}
-          {messages.map((message, index) => (
-            <div key={message.id ?? `${message.role}-${index}`} className={`chat-message ${message.role}`}>
-              {message.content}
-            </div>
+        <div className="chat-scroll" ref={chatScrollRef}>
+          <div className="chat-messages">
+            {messages.length === 0 && (
+              <div className="empty-chat">Try: "I ate chicken, rice and broccoli for dinner" or "Could my recent diet be affecting recovery?"</div>
+            )}
+            {messages.map((message, index) => (
+              <div key={message.id ?? `${message.role}-${index}`} className={`chat-message ${message.role}`}>
+                {message.content}
+              </div>
+            ))}
+            {status === "working" && <div className="chat-message assistant">Thinking...</div>}
+          </div>
+
+          {proposals.map((proposal, index) => (
+            <ProposalCard
+              key={`${proposal.type}-${index}`}
+              proposal={proposal}
+              onChange={(patch) => updateProposal(index, patch)}
+              onApply={() => void applyProposal(proposal, index)}
+              onDismiss={() => setProposals((current) => current.filter((_, proposalIndex) => proposalIndex !== index))}
+            />
           ))}
-          {status === "working" && <div className="chat-message assistant">Thinking...</div>}
+
+          {error && <div className="coach-error">{error}</div>}
         </div>
 
-        {proposals.map((proposal, index) => (
-          <ProposalCard
-            key={`${proposal.type}-${index}`}
-            proposal={proposal}
-            onChange={(patch) => updateProposal(index, patch)}
-            onApply={() => void applyProposal(proposal, index)}
-            onDismiss={() => setProposals((current) => current.filter((_, proposalIndex) => proposalIndex !== index))}
-          />
-        ))}
-
-        {error && <div className="coach-error">{error}</div>}
-
         <form
-          className="chat-composer"
+          className={`chat-composer ${status === "recording" ? "is-recording" : ""}`}
           onSubmit={(event) => {
             event.preventDefault();
             void submitMessage(input);
           }}
         >
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask about your nutrition or type what you ate..."
-            disabled={status !== "idle"}
-          />
-          <div className="composer-actions">
+          {status === "recording" ? (
+            <div className="recording-bar">
+              <button type="button" className="icon-btn cancel-recording" onClick={cancelRecording} aria-label="Cancel recording">
+                <TrashIcon />
+              </button>
+              <div className="recording-status"><span />{formatRecordingTime(recordingSeconds)}</div>
+              <button type="button" className="icon-btn send-recording" onClick={stopRecording} aria-label="Send voice memo">
+                <SendIcon />
+              </button>
+            </div>
+          ) : (
+          <div className="composer-row">
+            <textarea
+              value={input}
+              rows={1}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Message your nutrition coach"
+              disabled={status !== "idle"}
+            />
             <button
               type="button"
-              className={`voice-btn ${status === "recording" ? "recording" : ""}`}
-              onClick={status === "recording" ? stopRecording : () => void startRecording()}
-              disabled={status === "working"}
+              className="icon-btn composer-submit"
+              onClick={input.trim() ? () => void submitMessage(input) : () => void startRecording()}
+              disabled={status !== "idle"}
+              aria-label={input.trim() ? "Send message" : "Record voice memo"}
             >
-              {status === "recording" ? `Stop ${recordingSeconds}s` : "Voice memo"}
-            </button>
-            <button className="account-btn primary" disabled={!input.trim() || status !== "idle"}>
-              Send
+              {input.trim() ? <SendIcon /> : <MicIcon />}
             </button>
           </div>
+          )}
         </form>
       </div>
     </section>
   );
+}
+
+function formatRecordingTime(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function MicIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v4a4 4 0 0 0 4 4Zm7-4a7 7 0 0 1-14 0m7 7v3m-4 0h8" /></svg>;
+}
+
+function SendIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7m-7-7v14" /></svg>;
+}
+
+function TrashIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6m-8-10 1 14h10l1-14M9 7l1-3h4l1 3" /></svg>;
 }
 
 function ProposalCard({

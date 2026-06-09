@@ -462,10 +462,16 @@ export default function App() {
 
       if (proposal.type === "meal") {
         if (proposal.calories === null || proposal.protein === null) throw new Error("Calories and protein are required.");
+        const foodNote = `Food: ${proposal.summary}`;
+        const existingNotes = typeof current.notes === "string" ? current.notes.trim() : "";
+        const nextNotes = existingNotes.includes(foodNote)
+          ? existingNotes
+          : [existingNotes, foodNote].filter(Boolean).join("\n").slice(0, 2000);
         transaction.set(entryRef, {
           ...current,
           calories: Math.max(0, Math.round((Number(current.calories) || 0) + proposal.calories)),
           protein: Math.max(0, Math.round((Number(current.protein) || 0) + proposal.protein)),
+          notes: nextNotes,
           updatedAt: serverTimestamp(),
         });
         transaction.set(mealLogRef, {

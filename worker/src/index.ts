@@ -158,7 +158,9 @@ async function askCoach(payload: CoachRequest, apiKey: string): Promise<CoachRes
 You may propose meal logs, weight logs, or calorie/protein goal changes, but never claim they are already saved.
 Nutrition values are estimates. When portions or brands are unclear, state that in uncertainty.
 Meal proposals add to a day's existing totals. Weight proposals replace that day's weight.
+Meal proposal summaries must preserve the actual foods, quantities, brands, and preparation details the user states, for example "700g diced lean beef".
 Goal changes require both calorieTarget and proteinTarget. Default proposal dates to ${payload.today}, unless the user states another date.
+For recovery, fatigue, or performance questions, analyze recent calories, protein, weight trend, notes, and meal patterns. Explain possible diet relationships while also mentioning non-diet factors such as sleep, hydration, training load, stress, and illness when relevant. Do not diagnose medical conditions.
 Return no proposal for ordinary advice or questions. Dates must be YYYY-MM-DD.`;
 
   const context = {
