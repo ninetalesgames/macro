@@ -296,6 +296,16 @@ h2 {
   gap: 6px;
 }
 
+.photo-input {
+  display: none;
+}
+
+.photo-btn {
+  flex-basis: 40px;
+  color: #b9c0cb;
+  background: transparent;
+}
+
 .apply-btn {
   border: 1px solid #3a414d;
   border-radius: 9px;
@@ -752,6 +762,101 @@ h2 {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+}
+
+.monthly-chart {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #292d35;
+}
+
+.chart-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.chart-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.chart-header > span {
+  color: #737b88;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.monthly-chart svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.chart-grid-line {
+  stroke: #292e37;
+  stroke-width: 1;
+}
+
+.chart-axis-label,
+.chart-day-label,
+.chart-target-label {
+  fill: #717987;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.chart-axis-label {
+  text-anchor: end;
+}
+
+.chart-day-label {
+  text-anchor: middle;
+}
+
+.chart-target-label {
+  fill: #8f98ff;
+  text-anchor: end;
+}
+
+.chart-target-line {
+  stroke: #6674ff;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+  opacity: 0.7;
+}
+
+.chart-line {
+  fill: none;
+  stroke: #7b87ff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.chart-point {
+  fill: #15181d;
+  stroke: #9ba5ff;
+  stroke-width: 3;
+  cursor: pointer;
+}
+
+.chart-point.selected {
+  fill: #7180ff;
+  stroke: #fff;
+}
+
+.chart-empty {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  border: 1px dashed #303641;
+  border-radius: 12px;
+  color: #737b88;
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .cut-dot {

@@ -59,6 +59,7 @@ export default function Coach({
   const chunksRef = useRef<Blob[]>([]);
   const discardRecordingRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     async function loadMemory() {
@@ -171,7 +172,7 @@ export default function Coach({
       const result = await sendRequest(JSON.stringify(buildContext(cleanMessage)), "application/json");
       const assistantMessage: ChatMessage = { role: "assistant", content: result.reply };
       setMessages((current) => [...current, assistantMessage]);
-      setProposals(result.proposals);
+      setProposals(filterProposals(result.proposals, entries, today));
       await Promise.all([saveMessage(userMessage), saveMessage(assistantMessage)]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Coach request failed.");
@@ -234,12 +235,46 @@ export default function Coach({
       const userMessage: ChatMessage = { role: "user", content: transcript };
       const assistantMessage: ChatMessage = { role: "assistant", content: result.reply };
       setMessages((current) => [...current, userMessage, assistantMessage]);
-      setProposals(result.proposals);
+      setProposals(filterProposals(result.proposals, entries, today));
       await Promise.all([saveMessage(userMessage), saveMessage(assistantMessage)]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Voice log failed.");
     } finally {
       setStatus("idle");
+    }
+  }
+
+  async function submitPhoto(file: File) {
+    if (status !== "idle") return;
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Please choose an image smaller than 10 MB.");
+      return;
+    }
+
+    setError("");
+    setStatus("working");
+    const userMessage: ChatMessage = { role: "user", content: "Shared a meal photo for estimation." };
+    setMessages((current) => [...current, userMessage]);
+
+    try {
+      const preparedPhoto = await prepareMealPhoto(file);
+      const form = new FormData();
+      form.set("image", preparedPhoto, "meal.jpg");
+      form.set("context", JSON.stringify(buildContext("Estimate the food in this meal photo.")));
+      const result = await sendRequest(form);
+      const assistantMessage: ChatMessage = { role: "assistant", content: result.reply };
+      setMessages((current) => [...current, assistantMessage]);
+      setProposals(filterProposals(result.proposals, entries, today));
+      await Promise.all([saveMessage(userMessage), saveMessage(assistantMessage)]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Photo analysis failed.");
+    } finally {
+      setStatus("idle");
+      if (photoInputRef.current) photoInputRef.current.value = "";
     }
   }
 
@@ -313,6 +348,26 @@ export default function Coach({
             </div>
           ) : (
           <div className="composer-row">
+            <input
+              ref={photoInputRef}
+              className="photo-input"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void submitPhoto(file);
+              }}
+            />
+            <button
+              type="button"
+              className="icon-btn photo-btn"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={status !== "idle"}
+              aria-label="Add meal photo"
+            >
+              <PhotoIcon />
+            </button>
             <textarea
               value={input}
               rows={1}
@@ -353,12 +408,55 @@ function MicIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v4a4 4 0 0 0 4 4Zm7-4a7 7 0 0 1-14 0m7 7v3m-4 0h8" /></svg>;
 }
 
+function PhotoIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h4l2-3h4l2 3h4v13H4V7Zm8 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>;
+}
+
 function SendIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7m-7-7v14" /></svg>;
 }
 
 function TrashIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6m-8-10 1 14h10l1-14M9 7l1-3h4l1 3" /></svg>;
+}
+
+function filterProposals(proposals: CoachProposal[], entries: EntriesMap, today: string) {
+  const hasTodayWeight = typeof entries[today]?.weight === "number";
+  return proposals.filter((proposal) =>
+    !(hasTodayWeight && proposal.type === "weight" && (proposal.date === today || proposal.date === null)),
+  );
+}
+
+async function prepareMealPhoto(file: File) {
+  const image = new Image();
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("This photo format is not supported. Try taking a new photo."));
+      image.src = objectUrl;
+    });
+
+    const maxDimension = 1600;
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare this photo.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("Could not prepare this photo.")),
+        "image/jpeg",
+        0.82,
+      );
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function ProposalCard({

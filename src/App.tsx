@@ -693,6 +693,18 @@ export default function App() {
             <span><i className="maintain-dot" />Maintain</span>
             <span><i className="bulk-dot" />Bulk / below target</span>
           </div>
+
+          <MonthlyChart
+            mode={calendarMode}
+            month={viewMonth}
+            entries={entries}
+            goals={goals}
+            selectedDay={selectedDay}
+            onSelectDay={(dateKey) => {
+              setSelectedDay(dateKey);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
         </section>
         </>
         )}
@@ -750,4 +762,102 @@ function Stat({
       <strong>{value}</strong>
     </div>
   );
+}
+
+function MonthlyChart({
+  mode,
+  month,
+  entries,
+  goals,
+  selectedDay,
+  onSelectDay,
+}: {
+  mode: CalendarMode;
+  month: Date;
+  entries: EntriesMap;
+  goals: Goals;
+  selectedDay: string;
+  onSelectDay: (dateKey: string) => void;
+}) {
+  const daysInMonth = getMonthEnd(month).getDate();
+  const points = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(month.getFullYear(), month.getMonth(), index + 1);
+    const dateKey = getLocalDateString(date);
+    const value = entries[dateKey]?.[mode];
+    return typeof value === "number" ? { day: index + 1, dateKey, value } : null;
+  }).filter((point): point is { day: number; dateKey: string; value: number } => point !== null);
+
+  const target = mode === "calories" ? goals.calories : mode === "protein" ? goals.protein : undefined;
+  const scaleValues = [...points.map((point) => point.value), ...(target === undefined ? [] : [target])];
+  const rawMin = scaleValues.length > 0 ? Math.min(...scaleValues) : 0;
+  const rawMax = scaleValues.length > 0 ? Math.max(...scaleValues) : 1;
+  const padding = Math.max((rawMax - rawMin) * 0.15, mode === "weight" ? 0.5 : 10);
+  const min = Math.max(0, rawMin - padding);
+  const max = rawMax + padding;
+  const width = 760;
+  const height = 240;
+  const left = 42;
+  const right = 16;
+  const top = 18;
+  const bottom = 34;
+  const graphWidth = width - left - right;
+  const graphHeight = height - top - bottom;
+  const x = (day: number) => left + ((day - 1) / Math.max(daysInMonth - 1, 1)) * graphWidth;
+  const y = (value: number) => top + (1 - (value - min) / Math.max(max - min, 1)) * graphHeight;
+  const unit = mode === "calories" ? "kcal" : mode === "protein" ? "g" : "kg";
+
+  return (
+    <div className="monthly-chart">
+      <div className="chart-header">
+        <div>
+          <p className="eyebrow">Monthly graph</p>
+          <h3>{mode.charAt(0).toUpperCase() + mode.slice(1)}</h3>
+        </div>
+        <span>{points.length} logged days</span>
+      </div>
+
+      {points.length === 0 ? (
+        <div className="chart-empty">Log {mode} to build this month's graph.</div>
+      ) : (
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${mode} graph for ${formatMonthYear(month)}`}>
+          {[0, 0.5, 1].map((fraction) => {
+            const lineY = top + fraction * graphHeight;
+            const value = max - fraction * (max - min);
+            return (
+              <g key={fraction}>
+                <line className="chart-grid-line" x1={left} x2={width - right} y1={lineY} y2={lineY} />
+                <text className="chart-axis-label" x={left - 7} y={lineY + 4}>{formatChartValue(value, mode)}</text>
+              </g>
+            );
+          })}
+          {[1, Math.ceil(daysInMonth / 2), daysInMonth].map((day) => (
+            <text key={day} className="chart-day-label" x={x(day)} y={height - 9}>{day}</text>
+          ))}
+          {target !== undefined && (
+            <g>
+              <line className="chart-target-line" x1={left} x2={width - right} y1={y(target)} y2={y(target)} />
+              <text className="chart-target-label" x={width - right} y={y(target) - 6}>Target {target}{unit}</text>
+            </g>
+          )}
+          <polyline className="chart-line" points={points.map((point) => `${x(point.day)},${y(point.value)}`).join(" ")} />
+          {points.map((point) => (
+            <circle
+              key={point.dateKey}
+              className={`chart-point ${point.dateKey === selectedDay ? "selected" : ""}`}
+              cx={x(point.day)}
+              cy={y(point.value)}
+              r={point.dateKey === selectedDay ? 6 : 4}
+              onClick={() => onSelectDay(point.dateKey)}
+            >
+              <title>{`${formatLongDate(point.dateKey)}: ${formatChartValue(point.value, mode)} ${unit}`}</title>
+            </circle>
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function formatChartValue(value: number, mode: CalendarMode) {
+  return mode === "weight" ? value.toFixed(1) : Math.round(value).toString();
 }
