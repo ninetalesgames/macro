@@ -140,7 +140,7 @@ async function verifyFirebaseUser(request: Request, env: Env) {
 
 async function transcribe(audio: File, apiKey: string) {
   const form = new FormData();
-  form.set("file", audio, audio.name || "voice.webm");
+  form.set("file", audio, getAudioFilename(audio.type, audio.name));
   form.set("model", "gpt-4o-mini-transcribe");
 
   const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -151,6 +151,15 @@ async function transcribe(audio: File, apiKey: string) {
   const data = await response.json<{ text?: string; error?: { message?: string } }>();
   if (!response.ok || !data.text) throw new Error(data.error?.message ?? "Transcription failed");
   return data.text;
+}
+
+function getAudioFilename(mimeType: string, originalName: string) {
+  if (mimeType.includes("mp4")) return "voice.m4a";
+  if (mimeType.includes("ogg")) return "voice.ogg";
+  if (mimeType.includes("mpeg")) return "voice.mp3";
+  if (mimeType.includes("wav")) return "voice.wav";
+  if (mimeType.includes("webm")) return "voice.webm";
+  return originalName || "voice.webm";
 }
 
 async function askCoach(payload: CoachRequest, apiKey: string): Promise<CoachResult> {

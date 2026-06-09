@@ -227,7 +227,7 @@ export default function Coach({
     setError("");
     try {
       const form = new FormData();
-      form.set("audio", audio, "voice.webm");
+      form.set("audio", audio, getAudioFilename(audio.type));
       form.set("context", JSON.stringify(buildContext("")));
       const result = await sendRequest(form);
       const transcript = result.transcript?.trim() || "Voice memo";
@@ -335,6 +335,14 @@ export default function Coach({
       </div>
     </section>
   );
+}
+
+function getAudioFilename(mimeType: string) {
+  if (mimeType.includes("mp4")) return "voice.m4a";
+  if (mimeType.includes("ogg")) return "voice.ogg";
+  if (mimeType.includes("mpeg")) return "voice.mp3";
+  if (mimeType.includes("wav")) return "voice.wav";
+  return "voice.webm";
 }
 
 function formatRecordingTime(seconds: number) {
