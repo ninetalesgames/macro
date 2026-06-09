@@ -138,8 +138,225 @@ h2 {
   background: #15181d;
 }
 
+.app-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #292d35;
+  border-radius: 13px;
+  background: #15181d;
+}
+
+.app-tabs button {
+  border: 0;
+  border-radius: 9px;
+  color: #858d9a;
+  background: transparent;
+  padding: 11px;
+  font-weight: 800;
+}
+
+.app-tabs button.active {
+  color: #fff;
+  background: #292f3a;
+}
+
 .entry-panel {
   padding: 20px;
+}
+
+.goals-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.goal-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 160px));
+  gap: 8px;
+}
+
+.goal-inputs .number-field {
+  padding: 10px 12px;
+}
+
+.goal-inputs .number-field input {
+  font-size: 1.1rem;
+}
+
+.coach-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.coach-intro,
+.coach-signed-out {
+  padding: 20px;
+}
+
+.coach-intro > p:last-child,
+.coach-signed-out > p {
+  margin-top: 8px;
+  color: #8c93a1;
+  line-height: 1.5;
+}
+
+.coach-signed-out .account-btn {
+  margin-top: 18px;
+}
+
+.chat-panel {
+  padding: 14px;
+}
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 260px;
+  max-height: 55vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.empty-chat {
+  margin: auto;
+  max-width: 480px;
+  color: #737b88;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.chat-message {
+  max-width: 82%;
+  padding: 11px 13px;
+  border-radius: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  color: #fff;
+  background: #5260d9;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-message.assistant {
+  align-self: flex-start;
+  color: #dfe2e8;
+  background: #20242b;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-composer {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #303641;
+  border-radius: 13px;
+  background: #101318;
+}
+
+.chat-composer textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  color: #f2f4f7;
+  background: transparent;
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.voice-btn,
+.apply-btn {
+  border: 1px solid #3a414d;
+  border-radius: 9px;
+  color: #e0e3e8;
+  background: #20252c;
+  padding: 9px 12px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.voice-btn.recording {
+  border-color: #d55e5e;
+  color: #fff;
+  background: #a83f3f;
+}
+
+.proposal-card {
+  margin: 12px 6px;
+  padding: 14px;
+  border: 1px solid #5965dd;
+  border-radius: 13px;
+  background: rgba(82, 96, 217, 0.1);
+}
+
+.proposal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.proposal-header p,
+.uncertainty {
+  margin-top: 4px;
+  color: #929aa8;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.proposal-card label {
+  display: grid;
+  gap: 5px;
+  color: #aeb4bf;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.proposal-card input {
+  width: 100%;
+  border: 1px solid #39414e;
+  border-radius: 8px;
+  outline: 0;
+  color: #fff;
+  background: #11151a;
+  padding: 9px;
+}
+
+.proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.apply-btn {
+  width: 100%;
+  margin-top: 12px;
+  border-color: #5d6bf2;
+  color: #fff;
+  background: #5d6bf2;
+}
+
+.coach-error {
+  margin: 10px 6px;
+  padding: 10px;
+  border-radius: 9px;
+  color: #ffaaaa;
+  background: rgba(200, 70, 70, 0.12);
+  font-size: 0.78rem;
 }
 
 .text-btn,
@@ -494,7 +711,9 @@ h2 {
   }
 
   .entry-panel,
-  .calendar-panel {
+  .calendar-panel,
+  .coach-intro,
+  .coach-signed-out {
     padding: 14px;
     border-radius: 15px;
   }
@@ -503,6 +722,36 @@ h2 {
     grid-template-columns: 1fr;
     gap: 8px;
     margin-top: 16px;
+  }
+
+  .goals-panel {
+    display: block;
+    padding: 14px;
+  }
+
+  .goal-inputs {
+    grid-template-columns: repeat(2, 1fr);
+    margin-top: 12px;
+  }
+
+  .goal-inputs .number-field {
+    display: block;
+  }
+
+  .goal-inputs .number-field div {
+    width: 100%;
+  }
+
+  .chat-panel {
+    padding: 8px;
+  }
+
+  .chat-message {
+    max-width: 90%;
+  }
+
+  .proposal-grid {
+    grid-template-columns: 1fr;
   }
 
   .number-field {

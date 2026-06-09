@@ -1,73 +1,107 @@
-# React + TypeScript + Vite
+# Macro Journal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React, Firebase, and OpenAI-powered nutrition journal. The journal syncs
+between devices through Firestore. The optional AI Coach can answer questions,
+extract meal estimates from voice memos, and propose journal or goal updates.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Frontend checks:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run lint
+npm run build
 ```
+
+## AI Coach Setup
+
+The OpenAI key must never be placed in `src/` or any `VITE_` environment
+variable. The browser bundle is public. The key belongs in a Cloudflare Worker
+secret.
+
+### 1. Create the OpenAI API key
+
+1. Create an API key in the OpenAI API dashboard and enable API billing.
+2. Keep the key ready for the Wrangler secret prompt. Do not paste it into a
+   repository file.
+
+### 2. Find allowed Firebase user IDs
+
+1. Open Firebase Console.
+2. Go to **Authentication** → **Users**.
+3. Copy the UID for every account that should be allowed to use the Coach.
+4. Join multiple UIDs with commas and no spaces.
+
+The placeholder format is shown in `worker/.dev.vars.example`:
+
+```text
+OPENAI_API_KEY=APIKEYHERE
+ALLOWED_FIREBASE_UIDS=FIREBASEUIDHERE
+```
+
+### 3. Deploy the Cloudflare Worker
+
+Create a free Cloudflare account, then run:
+
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put ALLOWED_FIREBASE_UIDS
+npm run typecheck
+npm run deploy
+```
+
+Copy the deployed `https://...workers.dev` URL.
+
+For local Worker development only, create ignored `worker/.dev.vars` from
+`worker/.dev.vars.example` and replace the placeholders.
+
+### 4. Connect the frontend
+
+Create an ignored `.env.production.local` at the project root:
+
+```text
+VITE_COACH_API_URL=https://YOUR-WORKER.workers.dev
+```
+
+For local frontend development, create `.env.local` with the same variable.
+
+### 5. Publish Firestore rules
+
+Copy the full contents of `rules.txt` into Firebase Console → Firestore
+Database → Rules, then click **Publish**. These rules allow each signed-in user
+to access only their own entries, goals, meal logs, and chat memory.
+
+### 6. Deploy GitHub Pages
+
+After the Worker URL and Firestore rules are ready:
+
+```bash
+npm run lint
+npm run build
+git add .
+git commit -m "add ai nutrition coach"
+git push
+npm run deploy
+```
+
+## Coach Behavior
+
+- Typed messages and voice memos can propose meal, weight, and goal updates.
+- Nothing changes until the user confirms an editable proposal.
+- Meal calories and protein add to the selected day's totals.
+- Weight proposals replace that day's weight.
+- Goal proposals update chart and calendar target colors.
+- Audio is discarded immediately after transcription.
+- Firestore retains meal summaries and the latest 30 chat messages.
+- The Coach receives the latest 90 days of journal context plus the selected
+  date.
+
+Nutrition values generated by AI are estimates and are not medical advice.

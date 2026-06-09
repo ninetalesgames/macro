@@ -23,11 +23,65 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidGoals() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['calories', 'protein', 'updatedAt'])
+        && data.calories is int && data.calories >= 0 && data.calories <= 10000
+        && data.protein is int && data.protein >= 0 && data.protein <= 1000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMealLog() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          'date',
+          'summary',
+          'calories',
+          'protein',
+          'source',
+          'transcript',
+          'createdAt'
+        ])
+        && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.summary is string && data.summary.size() <= 2000
+        && data.calories is int && data.calories >= 0 && data.calories <= 20000
+        && data.protein is int && data.protein >= 0 && data.protein <= 2000
+        && data.source in ['coach', 'voice']
+        && data.transcript is string && data.transcript.size() <= 5000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidChatMessage() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['role', 'content', 'createdAt'])
+        && data.role in ['user', 'assistant']
+        && data.content is string && data.content.size() <= 10000
+        && data.createdAt is timestamp;
+    }
+
     match /users/{userId}/entries/{dateKey} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId)
         && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && isValidEntry();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/settings/goals {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidGoals();
+      allow delete: if false;
+    }
+
+    match /users/{userId}/mealLogs/{mealLogId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidMealLog();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/chatMessages/{messageId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidChatMessage();
       allow delete: if isOwner(userId);
     }
   }

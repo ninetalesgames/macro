@@ -1,0 +1,6 @@
+name = "macro-journal-coach"
+main = "src/index.ts"
+compatibility_date = "2026-06-09"
+
+[vars]
+FIREBASE_API_KEY = "AIzaSyDtQYXhOW188SNsouu5sjQZMys49C0LdiE"

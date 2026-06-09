@@ -11,6 +11,7 @@ TypeScript, and Vite. It lets a user:
 - View seven-day averages for calories, protein, and weight.
 - Compare the current seven-day weight average with the previous seven days.
 - See calendar entries color-coded as cutting, maintenance, or bulking zones.
+- Chat with an AI nutrition Coach and review proposed voice or text updates.
 
 The app uses Firebase Authentication and Cloud Firestore to sync journal
 entries between devices. A per-account `localStorage` cache keeps startup fast
@@ -31,9 +32,15 @@ macro-journal/
 |   |   `-- vite.svg
 |   |-- App.css
 |   |-- App.tsx
+|   |-- Coach.tsx
 |   |-- firebase.ts
 |   |-- index.css
+|   |-- types.ts
 |   `-- main.tsx
+|-- worker/
+|   |-- src/index.ts
+|   |-- package.json
+|   `-- wrangler.toml
 |-- dist/
 |-- node_modules/
 |-- .gitignore
@@ -59,6 +66,9 @@ Contains the application source code.
 - `App.tsx` contains the journal's data types, state, calculation helpers,
   event handlers, and all UI components.
 - `firebase.ts` initializes Firebase Authentication and Cloud Firestore.
+- `Coach.tsx` contains chat, voice recording, memory loading, and proposal UI.
+- `types.ts` contains shared journal, goal, and Coach proposal types.
+- `worker/` contains the Cloudflare Worker that securely calls OpenAI.
 - `App.css` contains the journal-specific layout and component styles.
 - `index.css` contains global styles, root sizing, typography, color variables,
   and some starter theme styles.
@@ -221,6 +231,23 @@ For calories, values within 150 calories of the target are maintenance. For
 weight trends, the app compares the selected day's seven-day average against
 the seven days before it. A difference smaller than `0.15 kg` is considered
 stable.
+
+The defaults are used until a signed-in user saves goals at
+`users/{firebaseUserId}/settings/goals`. Saved goals immediately drive chart
+and calendar target colors.
+
+## AI Coach
+
+The Coach is available only to signed-in users approved by the Worker UID
+allowlist. The browser sends a Firebase ID token to the Cloudflare Worker,
+which verifies the account before calling OpenAI.
+
+- Voice audio is transcribed and discarded.
+- Typed or transcribed messages return an answer and optional structured
+  proposals.
+- Users edit and confirm proposals before Firestore changes.
+- Meal logs, goals, and the latest 30 chat messages sync through Firestore.
+- The OpenAI key is stored only as a Cloudflare Worker secret.
 
 ## Styling Setup
 

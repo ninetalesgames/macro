@@ -6,20 +6,14 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
 import "./App.css";
+import Coach from "./Coach";
 import { auth, db, googleProvider } from "./firebase";
-
-type DayEntry = {
-  calories?: number;
-  protein?: number;
-  weight?: number;
-  notes?: string;
-};
-
-type EntriesMap = Record<string, DayEntry>;
+import type { CoachProposal, DayEntry, EntriesMap, Goals } from "./types";
 type CalendarMode = "calories" | "protein" | "weight";
 
 const DEFAULT_CALORIE_TARGET = 2100;
@@ -183,18 +177,19 @@ function getCalendarTone(
   entry: DayEntry,
   entries: EntriesMap,
   dateKey: string,
+  goals: Goals,
 ) {
   if (mode === "calories") {
     if (entry.calories === undefined) return "empty";
-    if (entry.calories <= DEFAULT_CALORIE_TARGET - 150) return "cut";
-    if (entry.calories >= DEFAULT_CALORIE_TARGET + 150) return "bulk";
+    if (entry.calories <= goals.calories - 150) return "cut";
+    if (entry.calories >= goals.calories + 150) return "bulk";
     return "maintain";
   }
 
   if (mode === "protein") {
     if (entry.protein === undefined) return "empty";
-    if (entry.protein >= DEFAULT_PROTEIN_TARGET) return "cut";
-    if (entry.protein >= DEFAULT_PROTEIN_TARGET * 0.8) return "maintain";
+    if (entry.protein >= goals.protein) return "cut";
+    if (entry.protein >= goals.protein * 0.8) return "maintain";
     return "bulk";
   }
 
@@ -224,6 +219,11 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<"local" | "saving" | "synced" | "error">("local");
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [activeTab, setActiveTab] = useState<"journal" | "coach">("journal");
+  const [goals, setGoals] = useState<Goals>({
+    calories: DEFAULT_CALORIE_TARGET,
+    protein: DEFAULT_PROTEIN_TARGET,
+  });
 
   const today = useMemo(() => new Date(), []);
   const todayKey = getLocalDateString(today);
@@ -323,6 +323,21 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setGoals({ calories: DEFAULT_CALORIE_TARGET, protein: DEFAULT_PROTEIN_TARGET });
+      return;
+    }
+
+    return onSnapshot(doc(db, "users", user.uid, "settings", "goals"), (snapshot) => {
+      const data = snapshot.data();
+      setGoals({
+        calories: typeof data?.calories === "number" ? data.calories : DEFAULT_CALORIE_TARGET,
+        protein: typeof data?.protein === "number" ? data.protein : DEFAULT_PROTEIN_TARGET,
+      });
+    });
+  }, [user]);
+
   const selectedEntry = getDayEntry(entries, selectedDay);
   const averageWeight = getAverage(entries, selectedDay, 7, "weight");
   const averageCalories = getAverage(entries, selectedDay, 7, "calories");
@@ -419,6 +434,60 @@ export default function App() {
     signOut(auth).catch((error) => console.error("Unable to sign out", error));
   }
 
+  async function saveGoals(nextGoals: Goals) {
+    if (!user) return;
+    await setDoc(doc(db, "users", user.uid, "settings", "goals"), {
+      calories: Math.max(0, Math.round(nextGoals.calories)),
+      protein: Math.max(0, Math.round(nextGoals.protein)),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function applyCoachProposal(proposal: CoachProposal) {
+    if (!user) throw new Error("Sign in before applying Coach updates.");
+
+    if (proposal.type === "goals") {
+      if (proposal.calorieTarget === null || proposal.proteinTarget === null) throw new Error("Both goals are required.");
+      await saveGoals({ calories: proposal.calorieTarget, protein: proposal.proteinTarget });
+      return;
+    }
+
+    if (!proposal.date) throw new Error("Choose a date before applying this update.");
+    const entryRef = doc(db, "users", user.uid, "entries", proposal.date);
+    const mealLogRef = doc(collection(db, "users", user.uid, "mealLogs"));
+
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(entryRef);
+      const current = snapshot.data() ?? {};
+
+      if (proposal.type === "meal") {
+        if (proposal.calories === null || proposal.protein === null) throw new Error("Calories and protein are required.");
+        transaction.set(entryRef, {
+          ...current,
+          calories: Math.max(0, Math.round((Number(current.calories) || 0) + proposal.calories)),
+          protein: Math.max(0, Math.round((Number(current.protein) || 0) + proposal.protein)),
+          updatedAt: serverTimestamp(),
+        });
+        transaction.set(mealLogRef, {
+          date: proposal.date,
+          summary: proposal.summary,
+          calories: Math.max(0, Math.round(proposal.calories)),
+          protein: Math.max(0, Math.round(proposal.protein)),
+          source: "coach",
+          transcript: proposal.summary,
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        if (proposal.weight === null) throw new Error("Weight is required.");
+        transaction.set(entryRef, {
+          ...current,
+          weight: Number(proposal.weight.toFixed(1)),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  }
+
   return (
     <main className="app-shell">
       <div className="app-layout">
@@ -446,6 +515,35 @@ export default function App() {
           </div>
         </header>
 
+        <nav className="app-tabs" aria-label="Main sections">
+          <button className={activeTab === "journal" ? "active" : ""} onClick={() => setActiveTab("journal")}>
+            Journal
+          </button>
+          <button className={activeTab === "coach" ? "active" : ""} onClick={() => setActiveTab("coach")}>
+            Coach
+          </button>
+        </nav>
+
+        {activeTab === "coach" ? (
+          user ? (
+            <Coach
+              user={user}
+              entries={entries}
+              selectedDate={selectedDay}
+              today={todayKey}
+              goals={goals}
+              onApplyProposal={applyCoachProposal}
+            />
+          ) : (
+            <section className="panel coach-signed-out">
+              <p className="eyebrow">AI nutrition coach</p>
+              <h2>Sign in to use the Coach</h2>
+              <p>The Coach needs your synced journal history to answer questions and propose updates.</p>
+              <button className="account-btn primary" onClick={handleSignIn}>Sign in with Google</button>
+            </section>
+          )
+        ) : (
+        <>
         <section className="panel entry-panel">
           <div className="section-header">
             <div>
@@ -504,6 +602,33 @@ export default function App() {
           </div>
         </section>
 
+        <section className="panel goals-panel">
+          <div>
+            <p className="eyebrow">Targets</p>
+            <h2>Daily goals</h2>
+          </div>
+          <div className="goal-inputs">
+            <NumberField
+              label="Calories"
+              unit="kcal"
+              value={goals.calories}
+              placeholder="2100"
+              onChange={(value) => {
+                if (value) void saveGoals({ ...goals, calories: Number(value) });
+              }}
+            />
+            <NumberField
+              label="Protein"
+              unit="g"
+              value={goals.protein}
+              placeholder="160"
+              onChange={(value) => {
+                if (value) void saveGoals({ ...goals, protein: Number(value) });
+              }}
+            />
+          </div>
+        </section>
+
         <section className="stats-strip" aria-label="Seven day averages">
           <Stat label="Weight avg" value={averageWeight === undefined ? "--" : `${averageWeight.toFixed(1)} kg`} />
           <Stat label="Calorie avg" value={averageCalories === undefined ? "--" : `${Math.round(averageCalories)}`} />
@@ -551,7 +676,7 @@ export default function App() {
               if (!date) return <div key={`empty-${index}`} className="calendar-spacer" />;
               const dateKey = getLocalDateString(date);
               const entry = getDayEntry(entries, dateKey);
-              const tone = getCalendarTone(calendarMode, entry, entries, dateKey);
+              const tone = getCalendarTone(calendarMode, entry, entries, dateKey, goals);
 
               return (
                 <button
@@ -573,6 +698,8 @@ export default function App() {
             <span><i className="bulk-dot" />Bulk / below target</span>
           </div>
         </section>
+        </>
+        )}
       </div>
     </main>
   );
